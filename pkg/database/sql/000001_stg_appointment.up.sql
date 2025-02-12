@@ -4,6 +4,7 @@ CREATE TABLE stg_appointment.users (
     user_id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
     timezone TEXT NOT NULL,  -- Stores user's timezone (e.g., 'America/New_York', 'Asia/Jakarta')
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NULL,
@@ -23,7 +24,7 @@ CREATE TABLE stg_appointment.invitations (
     id SERIAL PRIMARY KEY,
     appointment_id INT NOT NULL REFERENCES stg_appointment.appointments(appointment_id) ON DELETE CASCADE,
     invitee_id INT NOT NULL REFERENCES stg_appointment.users(user_id) ON DELETE CASCADE,
-    status VARHCAR(20) NOT NULL DEFAULT 'pending',
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
