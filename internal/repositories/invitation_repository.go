@@ -7,49 +7,53 @@ import (
 	"time"
 
 	"github.com/ghofaralhasyim/be-appointment-system/internal/models"
+	"github.com/lib/pq"
 )
 
-type AppointmentRepository interface {
-	InsertAppointment(tx *sql.Tx, appointment *models.Appointment) (*models.Appointment, error)
-	BeginAppointmentTx() (*sql.Tx, error)
-
-	GetAppointmentsByUserId(userId int, startDate, endDate time.Time) ([]models.AppointmentInvitation, error)
+type InvitationRepository interface {
+	InsertInvitation(tx *sql.Tx, invitations []models.Invitation) error
+	GetInvitations(userId int) ([]models.AppointmentInvitation, error)
+	UpdateStatusInvitation(userId int, invId int, status string) error
 }
 
-type appointmentRepository struct {
+type invitationRepository struct {
 	db *sql.DB
 }
 
-func NewAppointmentRepository(db *sql.DB) AppointmentRepository {
-	return &appointmentRepository{db: db}
+func NewInvitationRepository(db *sql.DB) InvitationRepository {
+	return &invitationRepository{db: db}
 }
 
-func (r *appointmentRepository) BeginAppointmentTx() (*sql.Tx, error) {
-	return r.db.Begin()
-}
-
-func (r *appointmentRepository) InsertAppointment(tx *sql.Tx, appointment *models.Appointment) (*models.Appointment, error) {
-	query := `
-		INSERT INTO stg_appointment.appointments
-			(host_id, title, start_time, end_time, created_at)
-		VALUES
-			($1, $2, $3, $4, $5)
-		RETURNING appointment_id;
-	`
-
-	err := r.db.QueryRow(
-		query, appointment.HostId, appointment.Title, appointment.StartTime, appointment.EndTime,
-		appointment.CreatedAt,
-	).Scan(&appointment.AppointmentId)
-
-	if err != nil {
-		return nil, err
+func (r *invitationRepository) InsertInvitation(tx *sql.Tx, invitations []models.Invitation) error {
+	if len(invitations) == 0 {
+		return nil
 	}
 
-	return appointment, nil
+	var appointmentIDs []int64
+	var inviteeIDs []int64
+	var statuses []string
+	var notes []string
+	var createdAts []time.Time
+
+	for _, inv := range invitations {
+		appointmentIDs = append(appointmentIDs, int64(inv.AppointmentId))
+		inviteeIDs = append(inviteeIDs, int64(inv.InviteeId))
+		statuses = append(statuses, inv.Status)
+		notes = append(notes, "")
+		createdAts = append(createdAts, time.Now())
+	}
+
+	query := `
+		INSERT INTO stg_appointment.invitations 
+			(appointment_id, invitee_id, status, notes, created_at)
+		SELECT * FROM UNNEST($1::bigint[], $2::bigint[], $3::text[], $4::text[], $5::timestamptz[])
+	`
+
+	_, err := tx.Exec(query, pq.Array(appointmentIDs), pq.Array(inviteeIDs), pq.Array(statuses), pq.Array(notes), pq.Array(createdAts))
+	return err
 }
 
-func (r *appointmentRepository) GetAppointmentsByUserId(userId int, startDate, endDate time.Time) ([]models.AppointmentInvitation, error) {
+func (r *invitationRepository) GetInvitations(userId int) ([]models.AppointmentInvitation, error) {
 	query := `
 		WITH user_tz AS (
 			SELECT timezone
@@ -96,20 +100,10 @@ func (r *appointmentRepository) GetAppointmentsByUserId(userId int, startDate, e
 				) AS limited_attendants
 			FROM stg_appointment.appointments a
 			JOIN stg_appointment.users host ON a.host_id = host.user_id
-			WHERE a.start_time BETWEEN $2 AND $3
-				AND (
-					a.host_id = $1  -- User is host
-					OR EXISTS (
-						SELECT 1 
-						FROM stg_appointment.invitations i 
-						WHERE i.appointment_id = a.appointment_id 
-						AND i.invitee_id = $1
-						AND (
-							a.host_id = $1  -- Allow all statuses if host
-							OR i.status = 'accepted'  -- Only accepted if not host
-						)
-					)
-				)
+			JOIN stg_appointment.invitations i ON a.appointment_id = i.appointment_id
+			WHERE i.invitee_id = $1     
+				AND a.host_id != $1        
+				AND i.status = 'pending' 
 		)
 		SELECT 
 			ad.appointment_id,
@@ -121,23 +115,18 @@ func (r *appointmentRepository) GetAppointmentsByUserId(userId int, startDate, e
 			ad.total_attendants,
 			COALESCE(ad.limited_attendants, '[]'::jsonb) as attendants,
 			-- Invitation details for the current user
-			COALESCE(i.invitation_id, 0) AS invitation_id,
-			COALESCE(i.invitee_id, ad.host_id) AS invitee_id,
-			COALESCE(i.status, 
-				CASE 
-					WHEN ad.host_id = $1 THEN 'host'
-					ELSE NULL 
-				END
-			) AS status,
-			COALESCE(i.created_at, ad.appointment_created_at) AS invitation_created_at
+			i.invitation_id,
+			i.invitee_id,
+			i.status,
+			i.created_at AS invitation_created_at
 		FROM appointment_details ad
-		LEFT JOIN stg_appointment.invitations i ON 
+		JOIN stg_appointment.invitations i ON 
 			ad.appointment_id = i.appointment_id 
 			AND i.invitee_id = $1
 		ORDER BY ad.start_time;
 	`
 
-	rows, err := r.db.Query(query, userId, startDate, endDate)
+	rows, err := r.db.Query(query, userId)
 	if err != nil {
 		return nil, fmt.Errorf("error querying appointments: %w", err)
 	}
@@ -188,4 +177,17 @@ func (r *appointmentRepository) GetAppointmentsByUserId(userId int, startDate, e
 	}
 
 	return appointments, nil
+}
+
+func (r *invitationRepository) UpdateStatusInvitation(userId int, invId int, status string) error {
+	query := `
+		UPDATE  stg_appointment.invitations
+		SET 
+			status = $1
+		WHERE 
+			invitee_id = $2 AND invitation_id = $3;
+	`
+
+	_, err := r.db.Exec(query, status, userId, invId)
+	return err
 }

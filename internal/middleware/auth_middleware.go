@@ -50,7 +50,12 @@ func AuthMiddleware(redisRepo repositories.RedisRepository) echo.MiddlewareFunc 
 				return c.JSON(http.StatusInternalServerError, map[string]string{"message": "failed get session data"})
 			}
 
-			c.Set("userId", int(dataUser["user_id"].(float64)))
+			userId, ok := dataUser["user_id"].(float64)
+			if !ok {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Invalid token claims"})
+			}
+
+			c.Set("userId", int(userId))
 			c.Set("sessionId", sessionId)
 
 			return next(c)

@@ -27,6 +27,7 @@ func main() {
 	echo := echo.New()
 
 	v := validator.New()
+	v.RegisterValidation("ISOdate", utils.ISODateValidator)
 	echo.Validator = &CustomValidator{validator: v}
 
 	echo.Use(middleware.CORSMiddleware)

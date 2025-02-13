@@ -9,8 +9,10 @@ import (
 )
 
 type UserRepository interface {
+	GetUsers() ([]models.User, error)
 	GetUserById(userId int) (*models.User, error)
 	GetUserByUsername(username string) (*models.User, error)
+	UpdateUserTimezone(userId int, timezone string) error
 }
 
 type userRepository struct {
@@ -24,7 +26,7 @@ func NewUserRepository(db *sql.DB) UserRepository {
 func (r *userRepository) GetUserByUsername(username string) (*models.User, error) {
 	query := `
 		SELECT
-			u.user_id, u.name, u.username, u.role, u.password_hash, u.timezone, timezone(u.timezone, u.created_at) as created_at,
+			u.user_id, u.name, u.username, u.role, u.timezone, timezone(u.timezone, u.created_at) as created_at,
 			timezone(u.timezone, u.updated_at) as updated_at
 		FROM stg_appointment.users u
 			WHERE u.username = $1 AND u.deleted_at IS NULL
@@ -35,7 +37,7 @@ func (r *userRepository) GetUserByUsername(username string) (*models.User, error
 	var updated, deleted sql.NullString
 
 	err := r.db.QueryRow(query, username).Scan(
-		&user.UserId, &user.Name, &user.Username, &user.Role, &user.PasswordHash, &user.Timezone,
+		&user.UserId, &user.Name, &user.Username, &user.Role, &user.Timezone,
 		&user.CreatedAt, &updated,
 	)
 	if err != nil {
@@ -68,7 +70,7 @@ func (r *userRepository) GetUserByUsername(username string) (*models.User, error
 func (r *userRepository) GetUserById(userId int) (*models.User, error) {
 	query := `
 		SELECT
-			u.user_id, u.name, u.username, u.password_hash, u.timezone, timezone(u.timezone, u.created_at) as created_at,
+			u.user_id, u.name, u.username, u.timezone, timezone(u.timezone, u.created_at) as created_at,
 			timezone(u.timezone, u.updated_at) as updated_at
 		FROM stg_appointment.users u WHERE u.user_id = $1 AND u.deleted_at IS NULL
 		LIMIT 1;
@@ -78,7 +80,7 @@ func (r *userRepository) GetUserById(userId int) (*models.User, error) {
 	var updated sql.NullString
 
 	err := r.db.QueryRow(query, userId).Scan(
-		&user.UserId, &user.Name, &user.Username, &user.PasswordHash, &user.Timezone, &user.CreatedAt, &updated,
+		&user.UserId, &user.Name, &user.Username, &user.Timezone, &user.CreatedAt, &updated,
 	)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -97,4 +99,55 @@ func (r *userRepository) GetUserById(userId int) (*models.User, error) {
 	}
 
 	return &user, nil
+}
+
+func (r *userRepository) GetUsers() ([]models.User, error) {
+	query := `
+		SELECT
+			u.user_id, u.name, u.username, u.timezone, 
+			timezone(u.timezone, u.created_at) as created_at,
+			timezone(u.timezone, u.updated_at) as updated_at
+		FROM stg_appointment.users u 
+		WHERE u.deleted_at IS NULL;
+	`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []models.User
+
+	for rows.Next() {
+		var user models.User
+		var updated sql.NullTime
+
+		err := rows.Scan(
+			&user.UserId, &user.Name, &user.Username, &user.Timezone, &user.CreatedAt, &updated,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if updated.Valid {
+			user.UpdatedAt = updated.Time
+		}
+
+		users = append(users, user)
+	}
+
+	return users, nil
+}
+
+func (r *userRepository) UpdateUserTimezone(userId int, timezone string) error {
+	query := `
+		UPDATE stg_appointment.users
+		SET
+			timezone = $1
+		WHERE user_id = $2;
+	`
+
+	_, err := r.db.Exec(query, timezone, userId)
+	return err
 }

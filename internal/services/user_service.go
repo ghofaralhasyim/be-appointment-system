@@ -11,12 +11,13 @@ import (
 	"github.com/ghofaralhasyim/be-appointment-system/internal/models"
 	"github.com/ghofaralhasyim/be-appointment-system/internal/repositories"
 	"github.com/ghofaralhasyim/be-appointment-system/pkg/utils"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type UserService interface {
-	Authenticate(email string, password string) (*models.User, *models.JwtToken, error)
+	Authenticate(email string) (*models.User, *models.JwtToken, error)
 	RefreshToken(refreshToken string, sessionId string) (*models.User, *models.JwtToken, error)
+	GetUsers() ([]models.User, error)
+	UpdateUserTimezone(userId int, timezone string) error
 }
 
 type userService struct {
@@ -29,6 +30,10 @@ func NewUserService(userRepository repositories.UserRepository, redisRepository 
 		userRepository:  userRepository,
 		redisRepository: redisRepository,
 	}
+}
+
+func (s *userService) GetUsers() ([]models.User, error) {
+	return s.userRepository.GetUsers()
 }
 
 func (s *userService) RefreshToken(refreshToken string, sessionId string) (*models.User, *models.JwtToken, error) {
@@ -83,15 +88,10 @@ func (s *userService) RefreshToken(refreshToken string, sessionId string) (*mode
 	return user, newToken, nil
 }
 
-func (s *userService) Authenticate(username string, password string) (*models.User, *models.JwtToken, error) {
+func (s *userService) Authenticate(username string) (*models.User, *models.JwtToken, error) {
 	user, err := s.userRepository.GetUserByUsername(username)
 	if err != nil {
 		return nil, nil, err
-	}
-
-	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
-	if err != nil {
-		return nil, nil, fmt.Errorf("unauthorize")
 	}
 
 	timestamp := time.Now().Unix()
@@ -126,4 +126,8 @@ func (s *userService) Authenticate(username string, password string) (*models.Us
 	}
 
 	return user, jwt, nil
+}
+
+func (s *userService) UpdateUserTimezone(userId int, timezone string) error {
+	return s.userRepository.UpdateUserTimezone(userId, timezone)
 }

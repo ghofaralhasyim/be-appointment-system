@@ -3,7 +3,6 @@ package http
 import (
 	"log"
 	"net/http"
-	"strings"
 
 	"github.com/ghofaralhasyim/be-appointment-system/internal/services"
 	"github.com/ghofaralhasyim/be-appointment-system/pkg/utils"
@@ -25,6 +24,22 @@ type refreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
 }
 
+func (h *UserHandler) GetUsers(c echo.Context) error {
+	users, err := h.userService.GetUsers()
+	if err != nil {
+		log.Println(err)
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"message": "failed retrieve users - internal server error",
+			"details": nil,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]interface{}{
+		"message": "ok",
+		"data":    users,
+	})
+}
+
 func (h *UserHandler) RefreshToken(c echo.Context) error {
 	sessionId, ok := c.Get("sessionId").(string)
 	if !ok {
@@ -44,8 +59,7 @@ func (h *UserHandler) RefreshToken(c echo.Context) error {
 		var validationErrors []map[string]string
 
 		for _, e := range err.(validator.ValidationErrors) {
-			fieldName := strings.ToLower(e.Field())
-			friendlyMessage := utils.GetFriendlyErrorMessage(e)
+			fieldName, friendlyMessage := utils.GetFriendlyErrorMessage(e, req)
 
 			validationErrors = append(validationErrors, map[string]string{
 				fieldName: friendlyMessage,
@@ -67,8 +81,6 @@ func (h *UserHandler) RefreshToken(c echo.Context) error {
 		})
 	}
 
-	user.PasswordHash = ""
-
 	return c.JSON(http.StatusAccepted, map[string]interface{}{
 		"message": "Refresh token success",
 		"data": map[string]interface{}{
@@ -80,7 +92,6 @@ func (h *UserHandler) RefreshToken(c echo.Context) error {
 
 type loginRequest struct {
 	Username string `json:"username" validate:"required"`
-	Password string `json:"password" validate:"required"`
 }
 
 func (h *UserHandler) Login(c echo.Context) error {
@@ -94,8 +105,7 @@ func (h *UserHandler) Login(c echo.Context) error {
 		var validationErrors []map[string]string
 
 		for _, e := range err.(validator.ValidationErrors) {
-			fieldName := strings.ToLower(e.Field())
-			friendlyMessage := utils.GetFriendlyErrorMessage(e)
+			fieldName, friendlyMessage := utils.GetFriendlyErrorMessage(e, req)
 
 			validationErrors = append(validationErrors, map[string]string{
 				fieldName: friendlyMessage,
@@ -108,7 +118,7 @@ func (h *UserHandler) Login(c echo.Context) error {
 		})
 	}
 
-	user, token, err := h.userService.Authenticate(req.Username, req.Password)
+	user, token, err := h.userService.Authenticate(req.Username)
 	if err != nil {
 		log.Println(err)
 		// not revealing whether a user is registered or not: CWE-204 CWE-203 OWASP A07:2021
@@ -125,13 +135,61 @@ func (h *UserHandler) Login(c echo.Context) error {
 		}
 	}
 
-	user.PasswordHash = ""
-
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"message": "Login success",
 		"data": map[string]interface{}{
 			"user":  user,
 			"token": token,
 		},
+	})
+}
+
+type reqChangeTZ struct {
+	Timezone string `json:"timezone" validate:"required"`
+}
+
+func (h *UserHandler) UpdateUserTimezone(c echo.Context) error {
+	userId, ok := c.Get("userId").(int)
+	if !ok {
+		return c.JSON(http.StatusUnauthorized, map[string]interface{}{
+			"message": "Invalid token or malformed token",
+			"details": nil,
+		})
+	}
+	var req reqChangeTZ
+
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"message": "Invalid request"})
+	}
+
+	if err := c.Validate(&req); err != nil {
+		var validationErrors []map[string]string
+
+		for _, e := range err.(validator.ValidationErrors) {
+			fieldName, friendlyMessage := utils.GetFriendlyErrorMessage(e, req)
+
+			validationErrors = append(validationErrors, map[string]string{
+				fieldName: friendlyMessage,
+			})
+		}
+
+		return c.JSON(http.StatusBadRequest, map[string]interface{}{
+			"message": "bad request - validation failed",
+			"details": validationErrors,
+		})
+	}
+
+	err := h.userService.UpdateUserTimezone(userId, req.Timezone)
+	if err != nil {
+		log.Println(err)
+		return c.JSON(http.StatusInternalServerError, map[string]interface{}{
+			"message": "failed update timezone - internal server error",
+			"details": nil,
+		})
+	}
+
+	return c.JSON(http.StatusAccepted, map[string]interface{}{
+		"message": "timezone updated",
+		"data":    nil,
 	})
 }
