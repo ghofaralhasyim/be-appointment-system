@@ -28,3 +28,14 @@ CREATE TABLE stg_appointment.invitations (
     notes VARCHAR(255),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE INDEX idx_users_username ON stg_appointment.users (username);
+CREATE INDEX idx_users_timezone ON stg_appointment.users (timezone);
+
+CREATE INDEX idx_appointments_host_id ON stg_appointment.appointments (host_id);
+CREATE INDEX idx_appointments_start_time ON stg_appointment.appointments (start_time);
+CREATE INDEX idx_appointments_end_time ON stg_appointment.appointments (end_time);
+
+CREATE INDEX idx_invitations_appointment_id ON stg_appointment.invitations (appointment_id);
+CREATE INDEX idx_invitations_invitee_id ON stg_appointment.invitations (invitee_id);
+CREATE INDEX idx_invitations_status ON stg_appointment.invitations (status);
